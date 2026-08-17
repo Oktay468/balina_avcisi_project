@@ -154,8 +154,3 @@ if st.sidebar.button("🔍 Canlı Taramayı Başlat", type="primary"):
             st.dataframe(res_df, use_container_width=True)
     else:
         st.error("Veri çekilebildi fakat analiz edilecek geçerli mum bulunamadı.")
-        else:
-            st.info(
-                "Taranan hisselerde belirlenen yüksek kriterde balina girişi"
-                " bulunamadı."
-            )
