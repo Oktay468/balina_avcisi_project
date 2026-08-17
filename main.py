@@ -30,7 +30,7 @@ else:
 market_type = st.sidebar.radio(
     "İşlem Yapılacak Piyasa:",
     options=["BIST", "ABD Borsası (US)"],
-    index=0,
+    index=1,
 )
 market_code = "BIST" if market_type == "BIST" else "US"
 currency = "TL" if market_code == "BIST" else "$"
