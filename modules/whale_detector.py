@@ -6,8 +6,8 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-
-    # Sıfıra bölünme (division by zero) engeli
+    
+    # Sıfıra bölünme hatasını önleme
     loss = loss.replace(0, 0.00001)
     rs = gain / loss
     return 100 - (100 / (1 + rs))
@@ -16,9 +16,9 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
 def detect_whale_activity(
     df: pd.DataFrame, volume_multiplier: float = 2.5
 ) -> dict:
-    """Multi-Filter (Çoklu Süzgeç) Canlı Seans Balina Analizi."""
-    # Seans başında en az 5 adet 5m mum oluşması yeterlidir
-    if df.empty or len(df) < 5:
+    """Multi-Filter (Çoklu Süzgeç) İleri Seviye Balina Analizi."""
+    # Minimum satır şartı günlük verileri de kapsayacak şekilde 15'e düşürüldü
+    if df.empty or len(df) < 15:
         return {
             "detected": False,
             "score": 0,
@@ -26,15 +26,15 @@ def detect_whale_activity(
             "vol_ratio": 0,
             "rsi": 0,
             "price_change_pct": 0,
-            "reasons": "Yetersiz Seans Verisi",
+            "reasons": "Yetersiz Veri",
             "target_1pct": 0,
             "target_2pct": 0,
         }
 
     latest = df.iloc[-1]
-    # Geriye dönük bakılacak mum sayısı (mevcut veri kadar)
+    # Son 20 periyodu veya mevcut veri kadarını al
     lookback = min(20, len(df) - 1)
-    prev_bars = df.iloc[-(lookback + 1) : -1]
+    prev_bars = df.iloc[-(lookback + 1):-1]
 
     # 1. Hacim Katı
     avg_vol = prev_bars["Volume"].mean()
@@ -42,19 +42,17 @@ def detect_whale_activity(
     vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 0
 
     # 2. Fiyat Değişimi
-    price_change_pct = (
-        (latest["Close"] - latest["Open"]) / latest["Open"]
-    ) * 100
+    price_change_pct = ((latest["Close"] - latest["Open"]) / latest["Open"]) * 100
 
     # 3. İndikatör Hesaplamaları
     df["EMA_50"] = df["Close"].ewm(span=min(50, len(df)), adjust=False).mean()
-    df["RSI"] = calculate_rsi(df["Close"], min(14, len(df) - 1))
+    df["RSI"] = calculate_rsi(df["Close"], 14)
 
     latest_rsi = df["RSI"].iloc[-1] if "RSI" in df else 50
     latest_ema = df["EMA_50"].iloc[-1] if "EMA_50" in df else latest["Close"]
     close_price = latest["Close"]
 
-    # --- SÜZGEÇ VE SKORLAMA MANTIĞI ---
+    # --- SÜZGEÇ VE SKORLAMA MANTIĞI (MAX 100 PUAN) ---
     score = 0
     reasons = []
 
@@ -63,7 +61,7 @@ def detect_whale_activity(
         score += 30
         reasons.append(f"Hacim {round(vol_ratio, 1)}x")
 
-    # Kriter B: Pozitif Mum (20 Puan)
+    # Kriter B: Pozitif Kapanış (20 Puan)
     if price_change_pct > 0:
         score += 20
         reasons.append("Pozitif Mum")
@@ -80,10 +78,7 @@ def detect_whale_activity(
 
     # Kriter E: Güçlü Kapanış (15 Puan)
     candle_range = latest["High"] - latest["Low"]
-    if (
-        candle_range > 0
-        and (latest["Close"] - latest["Low"]) / candle_range > 0.65
-    ):
+    if candle_range > 0 and (latest["Close"] - latest["Low"]) / candle_range > 0.65:
         score += 15
         reasons.append("Güçlü Kapanış")
 
