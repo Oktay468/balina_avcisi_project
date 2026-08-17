@@ -1,156 +1,128 @@
-import random
+import os
 import pandas as pd
 import streamlit as st
-
-# Modül içe aktarımları
-from modules.data_fetcher import get_all_market_tickers, get_stock_data
+from dotenv import load_dotenv
+from modules.data_fetcher import fetch_stock_data, get_all_market_tickers
 from modules.whale_detector import detect_whale_activity
 
-# Sayfa Yapılandırması
+load_dotenv()
+
 st.set_page_config(
-    page_title="Balina Avcısı - BIST & US Radar", page_icon="🐋", layout="wide"
+    page_title="Balina Avcısı - Alpaca Entegre Radar",
+    page_icon="🐋",
+    layout="wide",
 )
 
-st.title("🐋 Balina Avcısı - Hacim & Fiyat Radarı")
-st.caption("Piyasada sessizce toplanan hisseleri anlık tespit edin.")
+st.title("🐋 Balina Avcısı - Alpaca Entegre & Multi-Filter Radar")
+st.caption(
+    "Alpaca API desteği ile canlı borsa takibi ve çoklu süzgeçli balina analizi."
+)
 
-# --- SIDEBAR (TARAMA AYARLARI) ---
+# --- SIDEBAR ---
 st.sidebar.header("⚙️ Tarama Ayarları")
 
-market = st.sidebar.radio(
-    "İşlem Yapılacak Piyasa:", options=["BIST", "ABD Borsası (US)"], index=0
+alpaca_key = os.getenv("ALPACA_API_KEY")
+if alpaca_key:
+    st.sidebar.success("🟢 Alpaca API Bağlı (Canlı Veri)")
+else:
+    st.sidebar.warning("🟡 Alpaca Key Bulunamadı (Gecikmeli Veri)")
+
+market_type = st.sidebar.radio(
+    "İşlem Yapılacak Piyasa:",
+    options=["BIST", "ABD Borsası (US)"],
+    index=0,
 )
+market_code = "BIST" if market_type == "BIST" else "US"
+currency = "TL" if market_code == "BIST" else "$"
+
+with st.sidebar.status("Dış Kaynaktan Hisseler Çekiliyor...", expanded=False):
+    all_tickers = get_all_market_tickers(market_type=market_code)
+
+st.sidebar.info(f"Dış kaynaktan **{len(all_tickers)}** adet hisse yüklendi.")
 
 scan_limit = st.sidebar.slider(
-    "Taranacak Hisse Adedi:", min_value=10, max_value=200, value=50, step=10
+    "Taranacak Hisse Adedi:",
+    min_value=10,
+    max_value=min(len(all_tickers), 1000) if all_tickers else 100,
+    value=50,
+    step=10,
 )
 
 vol_multiplier = st.sidebar.slider(
     "Hacim Patlaması Hassasiyeti (Kat):",
     min_value=1.5,
     max_value=10.0,
-    value=4.5,
-    step=0.25,
+    value=2.5,
+    step=0.5,
 )
 
-# Seçilen piyasaya göre varsayılan tavan fiyat ve para birimi
-price_unit = "TL" if market == "BIST" else "$"
-default_max_price = 100.0 if market == "BIST" else 7.0
+# --- ANA EKRAN ---
+if st.button("🔍 Canlı Taramayı Başlat", type="primary"):
+    selected_tickers = all_tickers[:scan_limit]
 
-max_price_limit = st.sidebar.number_input(
-    f"Maksimum Hisse Fiyatı ({price_unit}):",
-    min_value=0.5,
-    max_value=5000.0,
-    value=default_max_price,
-    step=1.0,
-    help="Belirlenen fiyatın üzerindeki hisseler taramaya alınmaz.",
-)
+    st.divider()
+    st.subheader(
+        f"📊 {market_type} Taraması ({len(selected_tickers)} Hisse Analiz"
+        " Ediliyor)"
+    )
 
-random_scan = st.sidebar.checkbox(
-    "Hisseleri Rastgele Seç (A-Z Sırasını Boz)",
-    value=True,
-    help="İşaretlenirse tüm piyasa içinden rastgele hisse seçer, sadece 'A' harfindekilere takılmanızı engeller.",
-)
+    with st.expander("👁️ Taranan Hisse Sembollerini Gör"):
+        st.write(", ".join(selected_tickers))
 
-# --- TARAMA MANTIĞI ---
-if st.sidebar.button("🔍 Canlı Taramayı Başlat", type="primary"):
-    st.info("Piyasa verileri çekiliyor ve analiz ediliyor...")
-
-    # 1. Sembolleri Çek
-    all_tickers = get_all_market_tickers(market=market)
-
-    if not all_tickers:
-        st.error(
-            "Hisse listesi alınamadı. Lütfen internet / API bağlantısını kontrol edin."
-        )
-        st.stop()
-
-    # 2. Hisse Seçimi (Rastgele veya Sıralı)
-    if random_scan:
-        selected_tickers = random.sample(
-            all_tickers, min(scan_limit, len(all_tickers))
-        )
-    else:
-        selected_tickers = all_tickers[:scan_limit]
-
-    # 3. Analiz Döngüsü
-    results = []
     progress_bar = st.progress(0)
-    status_text = st.empty()
+    results = []
 
-    for idx, ticker in enumerate(selected_tickers):
-        status_text.text(
-            f"Analiz ediliyor ({idx + 1}/{len(selected_tickers)}): {ticker}"
-        )
-
-        df = get_stock_data(ticker, market=market)
-        if df is not None and not df.empty:
-            res = detect_whale_activity(
-                df, volume_multiplier=vol_multiplier, max_price=max_price_limit
-            )
-            res["ticker"] = ticker
+    for idx, symbol in enumerate(selected_tickers):
+        df = fetch_stock_data(symbol, market_type=market_code)
+        if not df.empty:
+            res = detect_whale_activity(df, volume_multiplier=vol_multiplier)
+            res["ticker"] = symbol.upper()
             results.append(res)
 
         progress_bar.progress((idx + 1) / len(selected_tickers))
 
-    status_text.empty()
     progress_bar.empty()
 
-    # 4. Sonuçları Ekrana Basma
     if results:
-        res_df = pd.DataFrame(results)
-        detected_df = res_df[res_df["detected"] == True]
-
-        st.subheader(
-            f"🔥 Toplam {len(detected_df)} hissede yüksek güvenlikli balina girişi tespit edildi!"
-        )
-
-        if not detected_df.empty:
-            # Öne Çıkarılan Kartlar
-            cols = st.columns(min(3, len(detected_df)))
-            for idx, (_, row) in enumerate(detected_df.iterrows()):
-                with cols[idx % 3]:
-                    st.metric(
-                        label=f"🚨 {row['ticker']} (Skor: {row['score']})",
-                        value=f"{row['close_price']} {price_unit}",
-                        delta=f"Hacim: {row['vol_ratio']}x",
-                    )
-                    st.caption(f"Neden: {row['reasons']}")
-
-            st.divider()
-
-            # Detaylı Tablo Görünümü
-            st.write("### 📊 Tespit Edilen Hisselerin Detaylı Listesi")
-            display_cols = [
-                "ticker",
-                "score",
-                "close_price",
-                "vol_ratio",
-                "price_change_pct",
-                "rsi",
-                "reasons",
-            ]
-            st.dataframe(
-                detected_df[display_cols].rename(
-                    columns={
-                        "ticker": "Hisse",
-                        "score": "Skor",
-                        "close_price": f"Fiyat ({price_unit})",
-                        "vol_ratio": "Hacim Katı",
-                        "price_change_pct": "Değişim %",
-                        "rsi": "RSI",
-                        "reasons": "Sinyal Nedenleri",
+        data_table = []
+        for r in results:
+            if r.get("close_price", 0) > 0:
+                status = "🚨 BALİNA VAR!" if r["detected"] else "⚪ Normal"
+                data_table.append(
+                    {
+                        "Hisse": r["ticker"],
+                        "Durum": status,
+                        "Güven Skoru": f"{r['score']} / 100",
+                        f"Son Fiyat ({currency})": f"{r['close_price']} {currency}",
+                        "Hacim Katı": f"{r['vol_ratio']}x",
+                        "RSI": r["rsi"],
+                        "Son Mum Değişimi": f"%{r['price_change_pct']}",
+                        "Onay Detayları": r["reasons"],
+                        f"%1 Hedef ({currency})": f"{r['target_1pct']} {currency}",
+                        f"%2 Hedef ({currency})": f"{r['target_2pct']} {currency}",
                     }
-                ),
-                use_container_width=True,
-            )
-        else:
-            st.warning(
-                "Belirlenen hacim katı ve fiyat limiti kriterlerine uyan hisse bulunamadı."
-            )
+                )
 
-        # Taranan Tüm Hisseleri İncelemek İçin Akordeon
-        with st.expander("📋 Taranan Tüm Hisselerin Sonuçlarını İncele"):
-            st.dataframe(res_df, use_container_width=True)
-    else:
-        st.error("Veri çekilebildi fakat analiz edilecek geçerli mum bulunamadı.")
+        res_df = pd.DataFrame(data_table)
+        res_df = res_df.sort_values(by="Güven Skoru", ascending=False)
+        st.dataframe(res_df, use_container_width=True)
+
+        whales_found = [r for r in results if r.get("detected")]
+        if whales_found:
+            st.success(
+                f"🔥 Toplam {len(whales_found)} hissede yüksek güvenlikli balina"
+                " girişi tespit edildi!"
+            )
+            cols = st.columns(min(len(whales_found), 3))
+            for i, w in enumerate(whales_found[:6]):
+                with cols[i % 3]:
+                    st.metric(
+                        label=f"🚨 {w['ticker']} (Skor: {w['score']})",
+                        value=f"{w['close_price']} {currency}",
+                        delta=f"Hacim: {w['vol_ratio']}x",
+                    )
+        else:
+            st.info(
+                "Taranan hisselerde belirlenen yüksek kriterde balina girişi"
+                " bulunamadı."
+            )
