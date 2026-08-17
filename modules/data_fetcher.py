@@ -4,62 +4,27 @@ import yfinance as yf
 
 
 def get_all_market_tickers(market="BIST"):
-    """Seçilen piyasaya göre hisse sembol listesini getirir."""
+    """Seçilen piyasaya göre tüm hisse sembollerini internetten dinamik çeker."""
     if market == "BIST":
-        # Popüler BIST hisselerinden oluşan örnek liste
-        return [
-            "THYAO",
-            "GARAN",
-            "ASELS",
-            "EREGL",
-            "AKBNK",
-            "SISE",
-            "KCHOL",
-            "TUPRS",
-            "BIMAS",
-            "SAHOL",
-            "YKBNK",
-            "ISCTR",
-            "EKGYO",
-            "HEKTS",
-            "SASA",
-            "KORDS",
-            "PETKM",
-            "ASTOR",
-            "KONTR",
-            "ALARK",
-            "AHSGY",
-            "AKFGY",
-            "AKMGY",
-            "ALKLC",
-            "ARASE",
-            "ARDYZ",
-            "ANELE",
-            "AHGAZ",
-        ]
+        try:
+            # BIST hisse listesini canlı kaynaktan çek
+            url = "https://raw.githubusercontent.com/sh4rk/bist-hisseleri/main/bist_hisseleri.json"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return []
     else:
-        # ABD Borsası (SEC veritabanından tüm canlı sembolleri çeker)
+        # ABD Borsası (SEC veritabanından dinamik çeker)
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
             url = "https://www.sec.gov/files/company_tickers.json"
             response = requests.get(url, headers=headers, timeout=10)
             data = response.json()
-            tickers = [item["ticker"] for item in data.values()]
-            return tickers
+            return [item["ticker"] for item in data.values()]
         except Exception:
-            # Bağlantı koparsa yedek ABD hisse listesi
-            return [
-                "AAPL",
-                "NVDA",
-                "TSLA",
-                "AMZN",
-                "MSFT",
-                "AMD",
-                "GOOGL",
-                "META",
-                "PLTR",
-                "SOFI",
-            ]
+            return []
 
 
 def get_stock_data(
@@ -67,7 +32,6 @@ def get_stock_data(
 ) -> pd.DataFrame:
     """Belirtilen hissenin mum verilerini çeker."""
     try:
-        # BIST hisseleri yfinance tarafında .IS uzantısı gerektirir
         symbol = (
             f"{ticker}.IS"
             if (market == "BIST" and not ticker.endswith(".IS"))
@@ -80,7 +44,6 @@ def get_stock_data(
         if df.empty:
             return None
 
-        # Sütun isimlerini standartlaştırma
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
         return df
     except Exception:
